@@ -97,17 +97,16 @@ class SBERTModel(nn.Module):
         
         elif self.pooling == 'mean':
             # Mean Pooling
-            if attention_mask is not None:
-                # 扩展 mask: [batch, seq, 1] -> [batch, seq, hidden]
-                input_mask_expanded = attention_mask.unsqueeze(-1).expand_as(outputs).float32()
-                
-                sum_embeddings = jt.sum(outputs * input_mask_expanded, dim=1)
-                sum_mask = input_mask_expanded.sum(dim=1)
-                sum_mask = jt.clamp(sum_mask, min_v=1e-9)
-                
-                embeddings = sum_embeddings / sum_mask
-            else:
-                embeddings = jt.mean(outputs, dim=1)
+            # [Batch, Seq] -> [Batch, Seq, Hidden]
+            input_mask_expanded = attention_mask.unsqueeze(-1).expand_as(outputs).float32()
+            
+            # 对 embeddings 进行加权求和（只保留非 Padding 部分）
+            sum_embeddings = jt.sum(outputs * input_mask_expanded, dim=1)
+            
+            # 计算非 Padding 的 token 数量（加一个极小值 1e-9 防止除以 0）
+            sum_mask = input_mask_expanded.sum(dim=1)
+            sum_mask = jt.clamp(sum_mask, min_v=1e-9)
+            embeddings = sum_embeddings / sum_mask
                 
         else:
             # Max Pooling

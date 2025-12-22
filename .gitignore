@@ -6,3 +6,4 @@ models/bert-large-uncased
 models/roberta-base
 venv
 __pycache__
+sanity_check.py
