@@ -18,6 +18,7 @@ def train():
         'data/multinli_1.0/multinli_1.0_train.jsonl'
     ]
     train_samples = load_nli_data(nli_data_paths, limit=5000)
+    total_samples = len(train_samples)
     train_dataset = NLIDataset(train_samples, tokenizer)
     train_loader = train_dataset.set_attrs(batch_size=16, shuffle=True, collate_batch=train_dataset.collate_batch)
 
@@ -27,9 +28,21 @@ def train():
     mnli_dev_samples = load_nli_data(['data/multinli_1.0/multinli_1.0_dev_matched.jsonl'], limit=500)
     mnli_dev_dataset = NLIDataset(mnli_dev_samples, tokenizer)
 
+    batch_size = 16
+    total_steps = total_samples // batch_size
+    warmup_proportion = 0.1  # 预热占比 10%
+    warmup_steps = int(total_steps * warmup_proportion)  # 预热步数
+    target_lr = 2e-5  # 目标学习率
+
     # 训练循环（1 Epoch）
     model.train()
     for batch_idx, (in_a, in_b, labels) in enumerate(train_loader):
+        if batch_idx < warmup_steps:
+            # 预热阶段
+            current_lr = target_lr * (batch_idx + 1) / warmup_steps
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = current_lr
+
         loss, logits = model(in_a, in_b, labels)
         
         optimizer.step(loss) # 更新梯度
