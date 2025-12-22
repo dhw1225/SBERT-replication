@@ -1,5 +1,6 @@
 import jittor as jt
 import jittor.nn as nn
+import numpy as np
 from models.modeling_jittor import JittorBertModel, JittorConfig
 from transformers import AutoModel, AutoConfig
 
@@ -12,6 +13,7 @@ def load_hf_weights(jit_model, hf_model_name):
     # 获取 Jittor 模型的参数字典
     jit_state = jit_model.state_dict()
 
+    is_roberta = "roberta" in hf_model_name.lower()
     loaded_cnt = 0
     
     for key, param in jit_state.items():
@@ -35,15 +37,36 @@ def load_hf_weights(jit_model, hf_model_name):
         
         if pt_key in pt_state:
             pt_np = pt_state[pt_key].cpu().detach().numpy()
-            
+
+            if is_roberta and "position_embeddings" in key:
+                # Jittor 模型期望从 index 0 开始是位置 0
+                # RoBERTa 权重从 index 2 开始才是位置 0 (index 0,1 是 pad/reserved)
+                shift = 2 
+                if pt_np.shape[0] > shift:
+                    # 提取有效的位置权重 (从第 2 行开始)
+                    # pt_np 形状 (514, 768) -> valid_weights (512, 768)
+                    valid_weights = pt_np[shift:, :]
+                    
+                    if param.shape[0] == valid_weights.shape[0]:
+                        pt_np = valid_weights
+                    elif param.shape[0] > valid_weights.shape[0]:
+                        # 如果 Jittor param 还是 514，则把有效权重放在前面，后面补零
+                        pad_len = param.shape[0] - valid_weights.shape[0]
+                        zeros = np.zeros((pad_len, valid_weights.shape[1]), dtype=valid_weights.dtype)
+                        pt_np = np.concatenate([valid_weights, zeros], axis=0)
+                    else:
+                        pt_np = valid_weights[:param.shape[0], :]
+
+            # RoBERTa token_type_embeddings 可能只有 1 行，而 BERT 有 2 行
+            if "token_type_embeddings" in key:
+                if param.shape[0] == 2 and pt_np.shape[0] == 1:
+                    # 复制一行，使得 index 0 和 1 都有权重 (全 0)
+                    pt_np = np.concatenate([pt_np, pt_np], axis=0)
+
             if param.shape != pt_np.shape:
                 # 处理 Linear 层转置问题 (PyTorch Linear 是 [out, in]，Jittor 是 [in, out])
-                if len(param.shape) == 2 and len(pt_np.shape) == 2:
-                    if param.shape == pt_np.T.shape:
-                        pt_np = pt_np.T
-                    else:
-                        print(f"Skipping {key}: Shape mismatch {param.shape} vs {pt_np.shape}")
-                        continue
+                if len(param.shape) == 2 and len(pt_np.shape) == 2 and param.shape == pt_np.T.shape:
+                    pt_np = pt_np.T
                 else:
                     print(f"Skipping {key}: Shape mismatch {param.shape} vs {pt_np.shape}")
                     continue
@@ -71,7 +94,8 @@ class SBERTModel(nn.Module):
             intermediate_size=hf_config.intermediate_size,
             max_position_embeddings=hf_config.max_position_embeddings,
             type_vocab_size=hf_config.type_vocab_size,
-            layer_norm_eps=hf_config.layer_norm_eps
+            layer_norm_eps=hf_config.layer_norm_eps,
+            pad_token_id = 1 if 'roberta' in model_path else 0
         )
         
         # 初始化 Jittor 版 BERT

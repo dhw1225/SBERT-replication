@@ -4,7 +4,7 @@ import numpy as np
 
 class JittorConfig:
     def __init__(self, vocab_size=30522, hidden_size=1024, num_hidden_layers=24, num_attention_heads=16,
-                 intermediate_size=4096, max_position_embeddings=512, type_vocab_size=2, layer_norm_eps=1e-12):
+                 intermediate_size=4096, max_position_embeddings=512, type_vocab_size=2, layer_norm_eps=1e-12, pad_token_id=0):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_hidden_layers = num_hidden_layers
@@ -13,6 +13,7 @@ class JittorConfig:
         self.max_position_embeddings = max_position_embeddings
         self.type_vocab_size = type_vocab_size
         self.layer_norm_eps = layer_norm_eps
+        self.pad_token_id = pad_token_id
 
 class JittorEmbeddings(nn.Module):
     def __init__(self, config):
@@ -22,15 +23,22 @@ class JittorEmbeddings(nn.Module):
         self.token_type_embeddings = nn.Embedding(config.type_vocab_size, config.hidden_size)
         self.LayerNorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.dropout = nn.Dropout(0.1)
+        self.padding_idx = getattr(config, 'pad_token_id', 0)
 
     def execute(self, input_ids, token_type_ids=None, position_ids=None):
-        seq_length = input_ids.shape[1]
-        if position_ids is None:
-            position_ids = jt.arange(seq_length).unsqueeze(0).expand_as(input_ids)
         if token_type_ids is None:
             token_type_ids = jt.zeros_like(input_ids)
 
+        seq_length = input_ids.shape[1]
+        position_ids = jt.arange(seq_length, dtype='int32').unsqueeze(0).expand_as(input_ids)
+
         words_embeddings = self.word_embeddings(input_ids)
+        
+        # 对于 RoBERTa，手动指定 padding_idx=1
+        if self.padding_idx is not None:
+            pad_mask = (input_ids == self.padding_idx)
+            words_embeddings[pad_mask] = 0.0
+
         position_embeddings = self.position_embeddings(position_ids)
         token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
