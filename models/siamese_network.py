@@ -1,11 +1,11 @@
 import jittor as jt
 import jittor.nn as nn
-from SBERT import SBERTModel 
+from models.SBERT import SBERTModel
 
 class SiameseSBERT(nn.Module):
-    def __init__(self, model_name='bert-base-uncased', pooling='mean', num_labels=3):
+    def __init__(self, model_path='models/bert-large-uncased', pooling='mean', num_labels=3):
         super(SiameseSBERT, self).__init__()
-        self.sbert = SBERTModel(model_name, pooling)
+        self.sbert = SBERTModel(model_path, pooling)
         self.classifier = nn.Linear(self.sbert.hidden_size * 3, num_labels)
         
     def execute(self, inputs_a, inputs_b, labels=None):

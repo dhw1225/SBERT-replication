@@ -106,7 +106,7 @@ class JittorIntermediate(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.dense = nn.Linear(config.hidden_size, config.intermediate_size)
-        self.intermediate_act_fn = nn.GelU() 
+        self.intermediate_act_fn = nn.GELU()
 
     def execute(self, hidden_states):
         hidden_states = self.dense(hidden_states)

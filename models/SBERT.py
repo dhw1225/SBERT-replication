@@ -6,45 +6,46 @@ from transformers import AutoModel, AutoConfig
 def load_hf_weights(jit_model, hf_model_name):
     print(f"Loading weights from {hf_model_name} to Jittor model...")
     
-    # 使用 Transformers 下载并加载 PyTorch 模型，用来提取 state_dict
+    # 加载 PyTorch 模型，用来提取 state_dict
     pt_model = AutoModel.from_pretrained(hf_model_name)
     pt_state = pt_model.state_dict()
-    
     # 获取 Jittor 模型的参数字典
     jit_state = jit_model.state_dict()
-    
-    # 建立映射并赋值
-    prefix = ""
-    if "roberta" in hf_model_name:
-        prefix = "roberta."
-    else:
-        if any(k.startswith("bert.") for k in pt_state.keys()):
-            prefix = "bert."
-            
+
     loaded_cnt = 0
+    
     for key, param in jit_state.items():
-        # 构造 PyTorch 对应的 Key
-        pt_key = prefix + key
+        # 尝试 1: 直接匹配
+        pt_key = key
         
-        # 修正特殊情况
+        # 尝试 2: 加上 bert. 前缀
         if pt_key not in pt_state:
-            if "LayerNorm.weight" in pt_key:
-                alt_key = pt_key.replace("LayerNorm.weight", "LayerNorm.gamma")
-                if alt_key in pt_state: pt_key = alt_key
-            elif "LayerNorm.bias" in pt_key:
-                alt_key = pt_key.replace("LayerNorm.bias", "LayerNorm.beta")
-                if alt_key in pt_state: pt_key = alt_key
+            pt_key = "bert." + key
+            
+        # 尝试 3: 加上 roberta. 前缀
+        if pt_key not in pt_state:
+            pt_key = "roberta." + key
+            
+        # 尝试 4 (特殊情况): 遍历 pt_state 寻找结尾匹配的 key
+        if pt_key not in pt_state:
+            for potential_key in pt_state.keys():
+                if potential_key.endswith(key):
+                    pt_key = potential_key
+                    break
         
         if pt_key in pt_state:
-            # PyTorch Tensor -> Numpy
             pt_np = pt_state[pt_key].cpu().detach().numpy()
             
-            # 形状检查
-            if pt_np.shape != param.shape:
-                if pt_np.T.shape == param.shape:
-                    pt_np = pt_np.T
+            if param.shape != pt_np.shape:
+                # 处理 Linear 层转置问题 (PyTorch Linear 是 [out, in]，Jittor 是 [in, out])
+                if len(param.shape) == 2 and len(pt_np.shape) == 2:
+                    if param.shape == pt_np.T.shape:
+                        pt_np = pt_np.T
+                    else:
+                        print(f"Skipping {key}: Shape mismatch {param.shape} vs {pt_np.shape}")
+                        continue
                 else:
-                    print(f"Global Skip: {key} shape mismatch. Jittor: {param.shape}, PT: {pt_np.shape}")
+                    print(f"Skipping {key}: Shape mismatch {param.shape} vs {pt_np.shape}")
                     continue
             
             param.assign(pt_np)
@@ -55,11 +56,11 @@ def load_hf_weights(jit_model, hf_model_name):
     print(f"Successfully loaded {loaded_cnt} parameters layers.")
 
 class SBERTModel(nn.Module):
-    def __init__(self, model_name='bert-large-uncased', pooling='mean'):
+    def __init__(self, model_path='models/bert-large-uncased', pooling='mean'):
         super(SBERTModel, self).__init__()
         
         # 根据 model_name 读取配置
-        hf_config = AutoConfig.from_pretrained(model_name)
+        hf_config = AutoConfig.from_pretrained(model_path)
         
         # 将 HF 配置转为 Jittor 配置
         jt_config = JittorConfig(
@@ -77,7 +78,7 @@ class SBERTModel(nn.Module):
         self.transformer = JittorBertModel(jt_config)
         
         # 加载权重
-        load_hf_weights(self.transformer, model_name)
+        load_hf_weights(self.transformer, model_path)
         
         self.pooling = pooling
         self.hidden_size = hf_config.hidden_size

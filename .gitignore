@@ -4,3 +4,5 @@ data/multinli_1.0
 data/snli_1.0
 models/bert-large-uncased
 models/roberta-base
+venv
+__pycache__
